@@ -330,6 +330,39 @@ bool try_stmt(State & s, AstStmt & ast) {
     return guard.commit();
 }
 
+bool dotted_name_list(State & s, AstExpr & ast) {
+    std::vector<AstExpr> names;
+    while (true) {
+        AstExpr name_expr;
+        if(!get_name(s, name_expr)) {
+            if (!names.empty())
+                syntax_error(s, name_expr, "Expected identifier after `.`");
+            break;
+        }
+        assert(name_expr && name_expr->type == AstType::Name);
+        AstNamePtr name = std::static_pointer_cast<AstName>(name_expr);
+        visit(context_assign{AstContext::Load}, name);
+        names.push_back(name_expr);
+        if(expect(s, TokenKind::Dot))
+            continue;
+        break;
+    }
+    if (names.empty())
+        return false;
+
+    ast = names[0];
+    for (auto it=names.begin()+1; it!=names.end(); ++it) {
+        AstAttributePtr attr;
+        location(s, create(attr));
+        attr->attribute = *it;
+        attr->value = ast;
+        ast = attr;
+        //pypa::detail::visit_dump_internal(0, *ast);
+    }
+
+    return true;
+}
+
 bool dotted_name(State & s, AstExpr & ast, bool as_dotted_name) {
     StateGuard guard(s, ast);
     if(get_name(s, ast)) {
@@ -1808,10 +1841,12 @@ bool decorator(State & s, AstExpr & ast) {
     if(!expect(s, TokenKind::At)) {
         return false;
     }
-    if(!dotted_name(s, ptr->function, false)) {
+    //if(!dotted_name(s, ptr->function, false)) {
+    if(!dotted_name_list(s, ptr->function)) {
         syntax_error(s, ast, "Expected identifier after `@`");
         return false;
     }
+
     if(expect(s, TokenKind::LeftParen)) {
         arglist(s, ptr->arglist);
         if(!expect(s, TokenKind::RightParen)) {
